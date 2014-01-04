@@ -14,13 +14,11 @@ def main(argv=None):
     This script exports all Bit.ly urls for an account.
     
     Required options:
-        -l=, --login=: Bit.ly login
-        -p=, --password=: Bit.ly Password (used to generate OAuth token)
+        -t=, --token=: Bit.ly OAuth token
     
     Optional parameters:
         -v: Verbose mode
         -h: Display this help and exit
-        -u, --user: Export data for a user other than the login user
     """
     # Load options using getopt
     if argv is None:
@@ -29,8 +27,8 @@ def main(argv=None):
     try:
         opts, args = getopt.getopt(
             argv[1:],
-            "vhl:p:u:o:",
-            ["help", "login=", "password=", "user=", "output="]
+            "vht:o:",
+            ["help", "token=", "output="]
         )
     except getopt.error, msg:
         print "Option parsing error: %s" % str(msg)
@@ -38,9 +36,7 @@ def main(argv=None):
     
     # Setup defaults
     verbose = False
-    login = None
-    password = None
-    user = None
+    access_token = None
     output_path = 'links.csv'
     
     try:
@@ -50,12 +46,8 @@ def main(argv=None):
             elif option in ("-h", "--help"):
                 print main.__doc__
                 return 0
-            elif option in ("-l", "--login"):
-                login = value
-            elif option in ("-p", "--password"):
-                password = value
-            elif option in ("-u", "--user"):
-                user = value
+            elif option in ("-t", "--token"):
+                access_token = value
             elif option in ("-o", "--output"):
                 output_path = value
             else:
@@ -65,13 +57,10 @@ def main(argv=None):
         print >> sys.stderr, "\t for help use --help"
         return 2
     
-    if login is None:
-        raise Exception('Login parameter must be present.')
+    if access_token is None:
+        raise Exception('Token parameter must be present.')
     
-    if password is None:
-        raise Exception('Password parameter must be present.')
-    
-    bitly = Bitly(login, password, verbose)
+    bitly = Bitly(access_token, verbose)
     
     limit = 100
     offset = 0
@@ -80,10 +69,10 @@ def main(argv=None):
     
     csv_writer = csv.writer(open(output_path, 'wb'), quoting=csv.QUOTE_ALL)
     csv_writer.writerow(('Link', 'Long url'))
-    
+
     while offset <= result_count:
-        data = bitly.user_link_history(limit=limit, offset=offset, user=user)
-        
+        data = bitly.user_link_history(limit=limit, offset=offset, access_token=access_token)
+    
         result_count = data['result_count']
         
         for link in data['link_history']:
@@ -106,29 +95,17 @@ def main(argv=None):
         print "Done! Found %d links, expected %d." % (nb_found, result_count)
 
 class Bitly(object):
-    def __init__(self, login, password, verbose=False):
+    def __init__(self, access_token, verbose=False):
         super(Bitly, self).__init__()
-        self.login = login
+        self.access_token = access_token
         self.verbose = verbose
         
-        self.access_token = requests.post(
-            'https://api-ssl.bitly.com/oauth/access_token',
-            auth=(login, password),
-            timeout=10
-        ).text
-        
-        if verbose:
-            print "Access token retrieved: %s" % self.access_token
-        
-    def user_link_history(self, limit=50, offset=0, user=None):
+    def user_link_history(self, limit=50, offset=0, access_token=None):
         params = {
             'limit': limit,
             'offset': offset,
             'archived': 'both'
         }
-    
-        if user is not None:
-            params['user'] = user
     
         return self._call('v3/user/link_history', params)['data']
 
@@ -137,9 +114,6 @@ class Bitly(object):
         A good chunk of the following method has been extracted from
         https://github.com/bitly/bitly-api-python
         """
-        # default to json
-        params['format'] = params.get('format','json')
-        
         params['access_token'] = self.access_token
         
         # force to utf8 to fix ascii codec errors
@@ -162,7 +136,7 @@ class Bitly(object):
         if http_response.status_code != 200:
             raise Exception('HTTP %d Error: %s' % (http_response.status_code, http_response.text))
         
-        data = http_response.json
+        data = http_response.json()
         
         if data is None or data.get('status_code', 500) != 200:
             raise Exception('Bitly returned error code %d: %s' % (data.get('status_code', 500), data.get('status_txt', 'UNKNOWN_ERROR')))
